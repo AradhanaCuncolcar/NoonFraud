@@ -1,14 +1,14 @@
 """Dynamic Plotly EDA: synthetic GAN fraud vs real data."""
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
 from scipy.stats import ks_2samp
 
 from src import config as C
 from src.eda import (LOG_DEFAULT, color_map, combined, hist_fig, ks_fig, ks_vs_real, scatter3d_fig,
                      signature_fig, signature_rates)
-from src.data import fraud_source
 from src.gan_sim import DEFAULTS
+from src.data import fraud_source
 from src.styling import plot, section, show_kpi
 
 ALL = ["real", "noon_gan", "my_gan", "sim", "real_legit"]
@@ -83,54 +83,36 @@ def render(ctx: dict) -> None:
 
     with t5:
         section("Direct comparison: My GAN vs Noon GAN",
-                "This comparison isolates the two synthetic fraud datasets, independent of the source-selection controls above.")
+                "Compare the two synthetic fraud datasets directly, independently of the real-data comparison.")
         my_gan = fraud_source("my_gan").copy()
         noon_gan = fraud_source("noon_gan").copy()
-        st.caption(f"Rows available: My GAN = {len(my_gan):,}; Noon GAN = {len(noon_gan):,}. Noon GAN is deduplicated by the data loader where applicable.")
-
-        # Numeric features use the two-sample KS statistic; binary features use the absolute
-        # difference in positive rates; payment method uses total-variation distance.
+        if my_gan.empty or noon_gan.empty:
+            st.warning("One of the GAN datasets is empty; check the files in the data folder.")
+            return
+        st.caption(f"Rows available: My GAN = {len(my_gan):,}; Noon GAN = {len(noon_gan):,}.")
         rows = []
         for feature in C.NUMERIC:
-            rows.append({
-                "Feature": C.FEATURE_LABELS[feature],
-                "Feature key": feature,
-                "Comparison metric": "KS distance",
-                "Distance": float(ks_2samp(my_gan[feature], noon_gan[feature]).statistic),
-            })
+            rows.append({"Feature": C.FEATURE_LABELS[feature], "Metric": "KS distance",
+                         "Distance": float(ks_2samp(my_gan[feature].dropna(), noon_gan[feature].dropna()).statistic)})
         for feature in C.BINARY:
-            rows.append({
-                "Feature": C.FEATURE_LABELS[feature],
-                "Feature key": feature,
-                "Comparison metric": "Absolute positive-rate gap",
-                "Distance": float(abs(my_gan[feature].mean() - noon_gan[feature].mean())),
-            })
+            rows.append({"Feature": C.FEATURE_LABELS[feature], "Metric": "Positive-rate gap",
+                         "Distance": float(abs(my_gan[feature].mean() - noon_gan[feature].mean()))})
         my_pay = my_gan["payment_method"].value_counts(normalize=True)
         noon_pay = noon_gan["payment_method"].value_counts(normalize=True)
         payment_tv = 0.5 * sum(abs(my_pay.get(v, 0.0) - noon_pay.get(v, 0.0)) for v in C.PAYMENTS)
-        rows.append({
-            "Feature": C.FEATURE_LABELS["payment_method"],
-            "Feature key": "payment_method",
-            "Comparison metric": "Total-variation distance",
-            "Distance": float(payment_tv),
-        })
+        rows.append({"Feature": C.FEATURE_LABELS["payment_method"], "Metric": "Total-variation distance",
+                     "Distance": float(payment_tv)})
         compare = pd.DataFrame(rows)
-
-        avg_distance = float(compare["Distance"].mean())
-        c1, c2, c3 = st.columns(3)
-        show_kpi(c1, "Features compared", f"{len(compare)}", "all configured fraud features")
-        show_kpi(c2, "Mean feature distance", f"{avg_distance:.3f}", "lower = more similar")
-        closest = compare.loc[compare["Distance"].idxmin(), "Feature"]
-        farthest = compare.loc[compare["Distance"].idxmax(), "Feature"]
-        show_kpi(c3, "Largest difference", farthest, f"smallest difference: {closest}")
-
-        fig = px.bar(compare.sort_values("Distance", ascending=False), x="Feature", y="Distance",
-                     color="Comparison metric",
-                     color_discrete_sequence=[C.CYAN, C.PINK, C.ORANGE],
-                     hover_data={"Feature key": True, "Distance": ":.3f"},
-                     labels={"Distance": "Distribution distance (lower = more similar)", "Feature": ""})
-        fig.update_layout(xaxis_tickangle=-30, yaxis_range=[0, max(0.05, float(compare["Distance"].max()) * 1.15)])
+        a, b, c = st.columns(3)
+        show_kpi(a, "Features compared", str(len(compare)), "configured fraud features")
+        show_kpi(b, "Mean distance", f"{compare['Distance'].mean():.3f}", "lower = more similar")
+        largest = compare.loc[compare["Distance"].idxmax(), "Feature"]
+        show_kpi(c, "Largest difference", largest, "feature with greatest distance")
+        fig = px.bar(compare.sort_values("Distance", ascending=False), x="Feature", y="Distance", color="Metric",
+                     labels={"Distance": "Distance (lower = more similar)", "Feature": ""},
+                     title="Feature-level distance: My GAN vs Noon GAN")
+        fig.update_layout(xaxis_tickangle=-30)
         plot(fig)
-        st.dataframe(compare[["Feature", "Comparison metric", "Distance"]].sort_values("Distance", ascending=False).round({"Distance": 3}),
+        st.dataframe(compare.sort_values("Distance", ascending=False).round({"Distance": 3}),
                      width="stretch", hide_index=True)
-        st.markdown("**How to interpret this:** KS distance is used for numeric features, the gap in positive rates for binary flags, and total-variation distance for payment method. A distance of 0 means the measured distributions match; lower values indicate closer similarity. The mean is a simple summary across metrics, not a formal overall statistical test.")
+        st.caption("Numeric features use KS distance; binary features use absolute positive-rate gaps; payment method uses total-variation distance. These are descriptive comparisons, not proof that the datasets are statistically identical.")
