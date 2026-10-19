@@ -1,3 +1,35 @@
+"""Dynamic Plotly EDA: synthetic GAN fraud vs real data."""
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+from scipy.stats import ks_2samp
+
+from src import config as C
+from src.eda import (LOG_DEFAULT, color_map, combined, hist_fig, ks_fig, ks_vs_real, scatter3d_fig,
+                     signature_fig, signature_rates)
+from src.data import fraud_source
+from src.gan_sim import DEFAULTS
+from src.styling import plot, section, show_kpi
+
+ALL = ["real", "noon_gan", "my_gan", "sim", "real_legit"]
+
+
+def render(ctx: dict) -> None:
+    section("Synthetic GAN data vs real data", "Interactive comparison — hover, zoom, rotate, toggle series in the legend.")
+    sim_params = tuple(st.session_state.get("gan_params", DEFAULTS).values())
+
+    with st.expander("⚙️ Data selection", expanded=True):
+        a, b, c = st.columns([3, 1, 1])
+        keys = a.multiselect("Sources to compare", ALL, default=["real", "noon_gan", "my_gan"], key="eda_src",
+                             format_func=lambda k: C.FRAUD_SOURCES[k]["label"],
+                             help="'GAN Lab simulation' uses the settings from the GAN Lab page.")
+        per = b.slider("Max rows per source", 100, 5000, 1500, 100, key="eda_per")
+        seed = c.number_input("Sample seed", 0, 999, 0, key="eda_seed")
+        sim_on = "sim" in keys
+        if sim_on:
+            st.caption(f"GAN Lab simulation → noise {sim_params[1]}, variance ×{sim_params[2]}, flag-flip {sim_params[3]:.0%}, {sim_params[0]:,} rows.")
+    if not keys:
+        st.info("Pick at least one source.")
         return
     keys_t = tuple(keys)
     df = combined(keys_t, sim_params, per, int(seed))
