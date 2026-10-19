@@ -1,31 +1,3 @@
-"""Dynamic Plotly EDA: synthetic GAN fraud vs real data."""
-import streamlit as st
-
-from src import config as C
-from src.eda import (LOG_DEFAULT, color_map, combined, hist_fig, ks_fig, ks_vs_real, scatter3d_fig,
-                     signature_fig, signature_rates)
-from src.gan_sim import DEFAULTS
-from src.styling import plot, section, show_kpi
-
-ALL = ["real", "noon_gan", "my_gan", "sim", "real_legit"]
-
-
-def render(ctx: dict) -> None:
-    section("Synthetic GAN data vs real data", "Interactive comparison — hover, zoom, rotate, toggle series in the legend.")
-    sim_params = tuple(st.session_state.get("gan_params", DEFAULTS).values())
-
-    with st.expander("⚙️ Data selection", expanded=True):
-        a, b, c = st.columns([3, 1, 1])
-        keys = a.multiselect("Sources to compare", ALL, default=["real", "noon_gan", "my_gan"], key="eda_src",
-                             format_func=lambda k: C.FRAUD_SOURCES[k]["label"],
-                             help="'GAN Lab simulation' uses the settings from the GAN Lab page.")
-        per = b.slider("Max rows per source", 100, 5000, 1500, 100, key="eda_per")
-        seed = c.number_input("Sample seed", 0, 999, 0, key="eda_seed")
-        sim_on = "sim" in keys
-        if sim_on:
-            st.caption(f"GAN Lab simulation → noise {sim_params[1]}, variance ×{sim_params[2]}, flag-flip {sim_params[3]:.0%}, {sim_params[0]:,} rows.")
-    if not keys:
-        st.info("Pick at least one source.")
         return
     keys_t = tuple(keys)
     df = combined(keys_t, sim_params, per, int(seed))
@@ -37,7 +9,7 @@ def render(ctx: dict) -> None:
         show_kpi(col, C.FRAUD_SOURCES[key]["label"], f"{n:,}", "rows shown", "cyan" if key != "real" else "")
     st.write("")
 
-    t1, t2, t3, t4 = st.tabs(["📊 Histograms", "🧊 3-D scatter", "📏 Distance to real", "🧬 Fraud signatures"])
+    t1, t2, t3, t4, t5 = st.tabs(["📊 Histograms", "🧊 3-D scatter", "📏 Distance to real", "🧬 Fraud signatures", "🆚 GAN-to-GAN"])
     with t1:
         a, b, c, d = st.columns([2, 1, 1, 1])
         feat = a.selectbox("Feature", C.NUMERIC + C.BINARY, key="eda_feat", format_func=lambda f: C.FEATURE_LABELS[f])
@@ -76,3 +48,57 @@ def render(ctx: dict) -> None:
         plot(signature_fig(sig, cmap))
         if "real_legit" in keys:
             st.caption("Real legit orders are shown only in the histogram / 3-D tabs; signatures compare fraud sources.")
+
+    with t5:
+        section("Direct comparison: My GAN vs Noon GAN",
+                "This comparison isolates the two synthetic fraud datasets, independent of the source-selection controls above.")
+        my_gan = fraud_source("my_gan").copy()
+        noon_gan = fraud_source("noon_gan").copy()
+        st.caption(f"Rows available: My GAN = {len(my_gan):,}; Noon GAN = {len(noon_gan):,}. Noon GAN is deduplicated by the data loader where applicable.")
+
+        # Numeric features use the two-sample KS statistic; binary features use the absolute
+        # difference in positive rates; payment method uses total-variation distance.
+        rows = []
+        for feature in C.NUMERIC:
+            rows.append({
+                "Feature": C.FEATURE_LABELS[feature],
+                "Feature key": feature,
+                "Comparison metric": "KS distance",
+                "Distance": float(ks_2samp(my_gan[feature], noon_gan[feature]).statistic),
+            })
+        for feature in C.BINARY:
+            rows.append({
+                "Feature": C.FEATURE_LABELS[feature],
+                "Feature key": feature,
+                "Comparison metric": "Absolute positive-rate gap",
+                "Distance": float(abs(my_gan[feature].mean() - noon_gan[feature].mean())),
+            })
+        my_pay = my_gan["payment_method"].value_counts(normalize=True)
+        noon_pay = noon_gan["payment_method"].value_counts(normalize=True)
+        payment_tv = 0.5 * sum(abs(my_pay.get(v, 0.0) - noon_pay.get(v, 0.0)) for v in C.PAYMENTS)
+        rows.append({
+            "Feature": C.FEATURE_LABELS["payment_method"],
+            "Feature key": "payment_method",
+            "Comparison metric": "Total-variation distance",
+            "Distance": float(payment_tv),
+        })
+        compare = pd.DataFrame(rows)
+
+        avg_distance = float(compare["Distance"].mean())
+        c1, c2, c3 = st.columns(3)
+        show_kpi(c1, "Features compared", f"{len(compare)}", "all configured fraud features")
+        show_kpi(c2, "Mean feature distance", f"{avg_distance:.3f}", "lower = more similar")
+        closest = compare.loc[compare["Distance"].idxmin(), "Feature"]
+        farthest = compare.loc[compare["Distance"].idxmax(), "Feature"]
+        show_kpi(c3, "Largest difference", farthest, f"smallest difference: {closest}")
+
+        fig = px.bar(compare.sort_values("Distance", ascending=False), x="Feature", y="Distance",
+                     color="Comparison metric",
+                     color_discrete_sequence=[C.CYAN, C.PINK, C.ORANGE],
+                     hover_data={"Feature key": True, "Distance": ":.3f"},
+                     labels={"Distance": "Distribution distance (lower = more similar)", "Feature": ""})
+        fig.update_layout(xaxis_tickangle=-30, yaxis_range=[0, max(0.05, float(compare["Distance"].max()) * 1.15)])
+        plot(fig)
+        st.dataframe(compare[["Feature", "Comparison metric", "Distance"]].sort_values("Distance", ascending=False).round({"Distance": 3}),
+                     width="stretch", hide_index=True)
+        st.markdown("**How to interpret this:** KS distance is used for numeric features, the gap in positive rates for binary flags, and total-variation distance for payment method. A distance of 0 means the measured distributions match; lower values indicate closer similarity. The mean is a simple summary across metrics, not a formal overall statistical test.")
