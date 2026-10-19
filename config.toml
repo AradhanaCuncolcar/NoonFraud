@@ -1,0 +1,14 @@
+# Noon brand theme: black canvas + Noon yellow accent
+[theme]
+base = "dark"
+primaryColor = "#FEEE00"
+backgroundColor = "#0B0B0C"
+secondaryBackgroundColor = "#17171A"
+textColor = "#F2F2F2"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
