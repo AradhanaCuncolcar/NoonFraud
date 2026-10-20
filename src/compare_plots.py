@@ -191,3 +191,22 @@ def roc_fig(curves: dict[str, dict], points: dict[str, dict], zoom: float = 0.05
     fig.add_scatter(x=[0, 1], y=[0, 1], name="Chance", line=dict(color=C.MUTED, dash="dot"))
     fig.update_xaxes(title="False-positive rate", range=[0, zoom]); fig.update_yaxes(title="Recall", range=[0, 1.02])
     return style_fig(fig, 400, f"ROC on real orders (FPR ≤ {zoom:.0%}) · dots = current threshold")
+
+
+# ------------------------------------------------------------------------------------ Phase 1 / 2 extras
+def loss_fig(df: pd.DataFrame) -> go.Figure:
+    """CTGAN generator / discriminator loss per epoch: the evidence that the GAN really trained."""
+    d = df.groupby("Epoch", as_index=False).mean(numeric_only=True)
+    fig = px.line(d.melt(id_vars="Epoch", var_name="Network", value_name="Loss"), x="Epoch", y="Loss", color="Network",
+                  color_discrete_map={"Generator loss": C.PINK, "Discriminator loss": C.CYAN})
+    return style_fig(fig, 380, "GAN training: generator vs discriminator loss")
+
+
+def rate_fig(rows: list[tuple[str, float]]) -> go.Figure:
+    """Fraud proportion of different datasets. rows = [(label, percent)]."""
+    d = pd.DataFrame(rows, columns=["dataset", "pct"])
+    fig = px.bar(d, x="dataset", y="pct", color="dataset", text="pct", labels={"pct": "% of orders that are fraud", "dataset": ""},
+                 color_discrete_sequence=[C.PINK, C.NOON_YELLOW, C.CYAN])
+    fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
+    fig.update_layout(showlegend=False); fig.update_yaxes(range=[0, max(d["pct"]) * 1.35])
+    return style_fig(fig, 340, "Fraud proportion: is mine realistic?")

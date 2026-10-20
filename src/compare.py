@@ -167,3 +167,99 @@ def gap_story(table: pd.DataFrame, mine: pd.DataFrame, noon: pd.DataFrame, top: 
             out.append(f"**{lab}** (distance {r['distance']:.2f}) — biggest gap on `{p}`: "
                        f"{pm.get(p, 0) * 100:.0f}% of my fraud vs {pn.get(p, 0) * 100:.0f}% of Noon's.")
     return out
+
+
+# ------------------------------------------------------------------------------------ Phase 1: how right were my assumptions?
+EFFECT_MATERIAL = 0.10     # |effect| below this = "not a signal"
+
+
+def _rank_effect(fraud: pd.Series, legit: pd.Series) -> float:
+    """2 x AUC - 1: +1 = fraud always higher than legit, -1 = always lower, 0 = no difference."""
+    from scipy.stats import rankdata
+    n1, n0 = len(fraud), len(legit)
+    r = rankdata(np.r_[fraud.to_numpy(float), legit.to_numpy(float)])
+    return float(2 * ((r[:n1].sum() - n1 * (n1 + 1) / 2) / (n1 * n0)) - 1)
+
+
+def _fmt(x: float) -> str:
+    return f"{x:.0f}" if abs(x) >= 10 else f"{x:.1f}"
+
+
+def _contrast(df: pd.DataFrame, f: str) -> tuple[float, str, str | None]:
+    """(effect of being fraud on feature f, plain-English text, top category for payment)."""
+    fr, lg = df[df[C.TARGET] == 1], df[df[C.TARGET] == 0]
+    k = kind_of(f)
+    if k == "numeric":
+        return (_rank_effect(fr[f], lg[f]), f"median {_fmt(fr[f].median())} (fraud) vs {_fmt(lg[f].median())} (legit)", None)
+    if k == "binary":
+        a, b = fr[f].mean(), lg[f].mean()
+        return float(a - b), f"{a:.0%} of fraud vs {b:.0%} of legit", None
+    pf, pl = fr[f].value_counts(normalize=True), lg[f].value_counts(normalize=True)
+    cat = max(C.PAYMENTS, key=lambda p: pf.get(p, 0) - pl.get(p, 0))
+    return float(pf.get(cat, 0) - pl.get(cat, 0)), f"`{cat}`: {pf.get(cat, 0):.0%} of fraud vs {pl.get(cat, 0):.0%} of legit", cat
+
+
+def assumption_check(mine: pd.DataFrame, real: pd.DataFrame) -> pd.DataFrame:
+    """Compare what makes a row fraud in MY seed world with what makes it fraud in the REAL data.
+
+    `mine` / `real` are labelled sets (is_fraud 0/1). Effects are on a -1..+1 scale (see _rank_effect / rate gap).
+    """
+    rows = []
+    for f in C.FEATURES:
+        a, ta, ca = _contrast(mine, f); b, tb, cb = _contrast(real, f)
+        big_a, big_b = abs(a) >= EFFECT_MATERIAL, abs(b) >= EFFECT_MATERIAL
+        if not big_a and not big_b:
+            v = "➖ Not a signal in either"
+        elif big_a and not big_b:
+            v = ("⚠️ Overstated a weak signal" if np.sign(a) == np.sign(b) and abs(b) >= EFFECT_MATERIAL / 2
+                 else "❌ Assumed a signal that is not there")
+        elif big_b and not big_a:
+            v = "⚠️ Missed a real signal"
+        elif kind_of(f) == "categorical" and ca != cb:
+            v = "⚠️ Different method flagged"
+        elif np.sign(a) != np.sign(b):
+            v = "❌ Opposite direction"
+        else:
+            v = "✅ Right" if 0.5 <= abs(b) / abs(a) <= 2 else "⚠️ Right direction, wrong strength"
+        rows.append(dict(feature=f, label=C.FEATURE_LABELS[f], my_assumption=ta, in_reality=tb,
+                         my_effect=a, real_effect=b, verdict=v))
+    return pd.DataFrame(rows)
+
+
+def read_loss_log(src) -> pd.DataFrame | None:
+    """Read a CTGAN loss log (the DataFrame `gan.loss_values` saved as CSV). Returns Epoch / Generator / Discriminator loss, or None."""
+    if src is None:
+        return None
+    try:
+        df = pd.read_csv(src)
+    except Exception:
+        return None
+    low = {c.lower(): c for c in df.columns}
+    pick = lambda key: next((low[c] for c in low if key in c), None)
+    g, d, e = pick("generator"), pick("discriminator") or pick("distriminator"), pick("epoch")
+    if g is None or d is None:
+        return None
+    return pd.DataFrame({"Epoch": df[e] if e else np.arange(len(df)), "Generator loss": df[g], "Discriminator loss": df[d]})
+
+
+# ------------------------------------------------------------------------------------ Phase 2.4: reflect
+def reflection(table: pd.DataFrame, mine: pd.DataFrame, noon: pd.DataFrame, top: int = 3) -> dict:
+    """What Noon's GAN captured that mine missed, where mine was better, and what to change (all from the numbers)."""
+    t = table.copy(); t["margin"] = t["my_to_real"] - t["noon_to_real"]
+    captured = [f"**{r.label}** — Noon's GAN is closer to real fraud (distance {r.noon_to_real:.2f} vs my {r.my_to_real:.2f})."
+                for r in t[t["margin"] > TIE_MARGIN].sort_values("margin", ascending=False).head(top).itertuples()]
+    better = [f"**{r.label}** — mine is closer to real fraud (distance {r.my_to_real:.2f} vs Noon's {r.noon_to_real:.2f})."
+              for r in t[t["margin"] < -TIE_MARGIN].sort_values("margin").head(2).itertuples()]
+    changes = []
+    for r in table.sort_values("distance", ascending=False).head(top).itertuples():
+        f = r.feature
+        if r.kind == "numeric":
+            changes.append(f"**{r.label}**: shift my fraud toward Noon's pattern (median {mine[f].median():.0f} → {noon[f].median():.0f}).")
+        elif r.kind == "binary":
+            changes.append(f"**{r.label}**: change how often it is set in my fraud ({mine[f].mean():.0%} → {noon[f].mean():.0%}).")
+        else:
+            pm, pn = mine[f].value_counts(normalize=True), noon[f].value_counts(normalize=True)
+            p = max(C.PAYMENTS, key=lambda k: abs(pm.get(k, 0) - pn.get(k, 0)))
+            changes.append(f"**{r.label}**: rebalance `{p}` in my fraud ({pm.get(p, 0):.0%} → {pn.get(p, 0):.0%}).")
+    changes.append("Run the lie-detector on every GAN version *before* training a classifier on it, and stop when it can no longer tell the sets apart.")
+    return dict(captured=captured, better=better, changes=changes)
