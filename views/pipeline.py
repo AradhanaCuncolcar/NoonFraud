@@ -14,7 +14,7 @@ import streamlit as st
 from src import compare as K
 from src import compare_plots as P
 from src import config as C
-from src.data import fraud_source, load_eval_set, load_noon_gan, load_seed_train
+from src.data import fraud_source, load_benchmark, load_eval_set, load_my_gan_pool, load_noon_gan, load_seed_train
 from src.metrics import confusion, derive, global_scores
 from src.models import load_bundle, predict_proba_df, score_eval_set
 from src.styling import plot, section, show_kpi
@@ -29,6 +29,9 @@ STEPS = [  # (short label, title, model / data used)
     ("⑥ Real data", "Run on Noon's actual data", "referee set · 65 real frauds"),
     ("⑦ vs Noon's classifier", "Compare with Noon's classifier", "Noon B · real + Noon GAN"),
 ]
+PHASES = [1, 1, 2, 2, 3, 3, 3]     # which assignment phase each step belongs to
+PHASE_NAMES = {1: "Build blind", 2: "Reveal", 3: "Referee"}
+LOSS_FILE = C.DATA_DIR / "ctgan_loss.csv"          # optional: drop your CTGAN loss log here to show it to everyone
 SUMMARY = "★ Summary"
 VERDICT_EMOJI = {"Match": "🟢 Match", "Close": "🟠 Close", "Differs": "🔴 Differs"}
 
@@ -72,6 +75,14 @@ def _seed_counts() -> tuple[int, int]:
         return 160_000, 800
 
 
+def _bench(model: str) -> dict:
+    """One row of the notebook's scorecard (referee set, threshold 0.50) as a metrics dict."""
+    r = load_benchmark().set_index("model").loc[model]
+    tp, fn, fp, tn = (int(r[k]) for k in ("TP", "FN", "FP", "TN"))
+    return dict(model=model, recall=float(r["recall"]), precision=float(r["precision"]), f1=float(r["f1"]),
+                tp=tp, fn=fn, fp=fp, tn=tn)
+
+
 def _metrics(mk: str, ek: str, t: float) -> dict:
     y = load_eval_set(ek)[C.TARGET].to_numpy(); p = score_eval_set(mk, ek)
     g = global_scores(mk, ek)
@@ -90,7 +101,7 @@ def _kpi_row(d: dict, tone_fp: str = "red") -> None:
 def _strip(active: int | None) -> None:
     cells = "".join(
         f'<div class="step{" star" if i == 3 else ""}{" active" if active == i else ""}">'
-        f'<div class="n">STEP {i + 1}</div><div class="t">{t}</div><div class="m">{m}</div></div>'
+        f'<div class="n">PHASE {PHASES[i]} · STEP {i + 1}</div><div class="t">{t}</div><div class="m">{m}</div></div>'
         for i, (_, t, m) in enumerate(STEPS))
     st.markdown(f'<div class="steps">{cells}</div>', unsafe_allow_html=True)
 
@@ -142,8 +153,11 @@ def _summary(ctx: dict) -> None:
     show_kpi(c[2], "My best real-data recall", f"{max(s2['recall'], n1['recall']) * 100:.0f}%", "S2 or N1 on 65 real frauds", "green")
     show_kpi(c[3], "Noon's classifier recall", f"{nb['recall'] * 100:.0f}%", f"{nb['fp']} false alarms", "")
     st.write("")
-    st.dataframe(pd.DataFrame(rows, columns=["Step", "What happens", "Model / data", "Result (live)"]),
-                 hide_index=True, width="stretch")
+    tbl = pd.DataFrame(rows, columns=["Step", "What happens", "Model / data", "Result (live)"])
+    tbl.insert(0, "Phase", [f"{p} · {PHASE_NAMES[p]}" for p in PHASES])
+    st.dataframe(tbl, hide_index=True, width="stretch")
+    st.caption("**Phase 4 · Ship it** → the 🔍 **Explainer** page is the fraud-check tool (type a transaction → FRAUD / LEGIT). "
+               "The ≈1-page report with every number is on the 📋 **Phases & report** page.")
     a, b = st.columns([3, 2], gap="large")
     with a:
         plot(P.metrics_fig(pd.DataFrame([s2, n1, nb]), "Step 7 in one picture · real referee orders"))
@@ -156,6 +170,32 @@ def _summary(ctx: dict) -> None:
 
 
 # ------------------------------------------------------------------------------------ step 1
+def _assumptions() -> None:
+    section("How right were my assumptions?",
+            "My seed world (what I assumed fraud looks like) vs the real referee set. Effect size: −1…+1, how strongly being fraud shifts the feature.")
+    chk = K.assumption_check(load_eval_set("seed_test"), load_eval_set("referee"))
+    st.dataframe(chk[["label", "my_assumption", "in_reality", "my_effect", "real_effect", "verdict"]].rename(columns={
+        "label": "Feature", "my_assumption": "In my seed world", "in_reality": "In real data",
+        "my_effect": "My effect", "real_effect": "Real effect", "verdict": "Verdict"}),
+        hide_index=True, width="stretch", column_config={
+            "My effect": st.column_config.NumberColumn(format="%+.2f"), "Real effect": st.column_config.NumberColumn(format="%+.2f")})
+    n = chk["verdict"].str.startswith("✅").sum()
+    st.caption(f"{n} of 10 assumptions were right in direction and strength. Real fraud has only 65 rows, so weak effects (< 0.10) are noise.")
+
+
+def _gan_evidence(n_delivered: int) -> None:
+    section("Evidence the GAN trained", "Brief 1.4: keep evidence that the GAN really trained (loss behaviour / generator).")
+    up = st.file_uploader("Upload your CTGAN loss log (CSV saved from `gan.loss_values`)", type="csv", key="pipe_loss_up")
+    loss = K.read_loss_log(up if up is not None else (LOSS_FILE if LOSS_FILE.exists() else None))
+    if loss is not None:
+        plot(P.loss_fig(loss))
+        st.caption(f"{loss['Epoch'].nunique():,} epochs logged.")
+    else:
+        st.info("No loss log found. In your notebook run `gan.loss_values.to_csv('ctgan_loss.csv', index=False)` and either upload it "
+                "above or save it as `data/ctgan_loss.csv` — the loss curves then appear here for everyone.")
+    st.caption(f"Generator output kept: pool of {len(load_my_gan_pool()):,} generated rows, of which {n_delivered:,} are the delivered file.")
+
+
 def _s1(ctx: dict) -> None:
     seed_n, seed_fraud = _seed_counts(); ref = load_eval_set("referee"); mine = fraud_source("my_gan")
     seed_rate = seed_fraud / seed_n
@@ -174,10 +214,46 @@ def _s1(ctx: dict) -> None:
     with b:
         st.markdown("**Summary of my GAN's numeric features**")
         st.dataframe(K.numeric_summary({"My GAN": mine}).drop(columns="Source").round(1), hide_index=True, width="stretch")
+    st.write("")
+    section("Rarity decision", "How much of the seed should be fraud? (brief 1.2: 'this choice matters more than you think')")
+    ratio = seed_rate / ref[C.TARGET].mean()
+    plot(P.rate_fig([("My seed", seed_rate * 100), ("Real referee", ref[C.TARGET].mean() * 100)]))
+    st.markdown(f"I set fraud to **{seed_rate * 100:.2f}%** of the seed; real orders are **{ref[C.TARGET].mean() * 100:.2f}%** fraud. "
+                f"That is **{ratio:.1f}×** the real rate — " + ("rare like the real thing (within 2×), yet with enough fraud for the model to learn from."
+                if ratio <= 2 else "noticeably fraudier than reality, which tends to inflate false alarms."))
+    st.write("")
+    _assumptions()
+    st.write("")
+    _gan_evidence(len(mine))
     st.info("Next → **② My classifier**: does a model trained on this data actually find fraud?")
 
 
 # ------------------------------------------------------------------------------------ step 2
+def _before_after() -> None:
+    section("Before vs after adding my GAN's fraud",
+            "Brief 1.5 — 'did it catch more fraud? what happened to false positives?' Notebook numbers on the real referee set at threshold 0.50.")
+    b, a = _bench("S0"), _bench("S2")
+    c = st.columns(4)
+    show_kpi(c[0], "Fraud caught (recall)", f"{b['recall'] * 100:.1f}% → {a['recall'] * 100:.1f}%", f"{b['tp']} → {a['tp']} of 65 frauds", "green")
+    show_kpi(c[1], "Precision", f"{b['precision'] * 100:.0f}% → {a['precision'] * 100:.0f}%", "flags that were really fraud", "cyan")
+    show_kpi(c[2], "F1-score", f"{b['f1']:.2f} → {a['f1']:.2f}", "balance of the two")
+    show_kpi(c[3], "False alarms", f"{b['fp']} → {a['fp']}", "legit orders wrongly flagged", "red")
+    st.write("")
+    x, y = st.columns([2, 3], gap="large")
+    with x:
+        plot(P.metrics_fig(pd.DataFrame([dict(b, model="S0 · seed only"), dict(a, model="S2 · seed + my GAN")]), "Before vs after (recall · precision · F1)"))
+    with y:
+        c1, c2 = st.columns(2)
+        with c1:
+            plot(P.confusion_fig(b, "BEFORE · S0 seed only"))
+        with c2:
+            plot(P.confusion_fig(a, "AFTER · S2 seed + my GAN"))
+    times = a["tp"] / max(b["tp"], 1)
+    st.markdown(f"**Reading it:** the GAN's fraud lifts recall from **{b['recall'] * 100:.1f}%** to **{a['recall'] * 100:.1f}%** "
+                f"(**{times:.1f}×** more frauds caught) but false alarms rise from **{b['fp']}** to **{a['fp']}**. "
+                f"Accuracy would hide all of this — S0 is {(b['tp'] + b['tn']) / (b['tp'] + b['tn'] + b['fp'] + b['fn']) * 100:.2f}% accurate while missing {b['fn']} of 65 frauds.")
+
+
 def _s2(ctx: dict) -> None:
     t = ctx["threshold"]; d = _metrics("S2", "seed_test", t)
     section("Step 2 · Classifier built from my GAN dataset",
@@ -193,6 +269,8 @@ def _s2(ctx: dict) -> None:
             f"- Even here it catches **{d['recall'] * 100:.0f}%** of fraud — fraud is rare, so recall is the number to watch, not accuracy "
             f"({d['accuracy'] * 100:.2f}% accurate!).\n"
             f"- Steps ⑥–⑦ show what happens when S2 meets Noon's real orders.")
+    st.write("")
+    _before_after()
     st.info("Next → **③ Noon GAN**: Noon's own synthetic fraud.")
 
 
@@ -239,7 +317,8 @@ def _s4(ctx: dict) -> None:
     show_kpi(c[4], "Lie-detector accuracy", f"{lie['accuracy'] * 100:.0f}%", "50% = can't tell them apart", "red" if lie["accuracy"] > .8 else "")
     st.write("")
 
-    t1, t2, t3, t4, t5 = st.tabs(["📋 Scorecard", "🔎 One feature", "🧩 All features", "🔗 Relationships", "🕵️ Lie-detector"])
+    t1, t2, t3, t4, t5, t6, t7 = st.tabs(["📋 Scorecard", "🔎 One feature", "🧩 All features", "🔗 Relationships", "🕵️ Lie-detector",
+                                          "⚖️ Fraud proportion", "💭 Reflect"])
     with t1:
         show = tab.copy(); show["verdict"] = show["verdict"].map(VERDICT_EMOJI)
         cols = ["label", "kind", "my_gan", "noon_gan"] + (["real_fraud"] if with_real else []) + ["distance", "verdict"] + \
@@ -302,6 +381,37 @@ def _s4(ctx: dict) -> None:
             st.markdown("**Biggest giveaways:** " + ", ".join(f"{C.FEATURE_LABELS[f]} ({v * 100:.0f}%)" for f, v in top.items()))
         with b:
             plot(P.importance_fig(imp, "Which features give the generator away?", "Share of the lie-detector's decision"))
+    with t6:
+        seed_n, seed_fraud = _seed_counts(); ref = load_eval_set("referee")
+        real_rate = ref[C.TARGET].mean() * 100; my_rate = seed_fraud / seed_n * 100
+        a, b = st.columns([2, 3], gap="large")
+        with a:
+            k = st.columns(2)
+            show_kpi(k[0], "My seed", f"{my_rate:.2f}%", f"{seed_fraud} of {seed_n:,}", "")
+            show_kpi(k[1], "Real orders", f"{real_rate:.2f}%", f"{int(ref[C.TARGET].sum())} of {len(ref):,}", "cyan")
+            st.write("")
+            st.markdown(f"- **Mine is {my_rate / real_rate:.1f}× the real rate** — " + ("realistic rarity." if my_rate / real_rate <= 2 else "too fraud-heavy.") + "\n"
+                        "- **Noon's** benchmark note describes its data as realistically rare (≈ 0.3%) — that is the real referee rate; "
+                        "Noon's GAN file itself contains only fraud rows, so it has no proportion of its own.\n"
+                        "- A fraud-heavy mix teaches a classifier that fraud is common, so it flags too many innocent orders.")
+        with b:
+            plot(P.rate_fig([("My seed", my_rate), ("Real referee (≈ Noon)", real_rate)]))
+    with t7:
+        ref_ = _comparison(dedupe)["table"]; rf = K.reflection(ref_, frames["My GAN"], frames["Noon GAN"])
+        a, b = st.columns(2, gap="large")
+        with a:
+            section("What Noon's GAN captured that mine missed")
+            for line in rf["captured"] or ["No feature where Noon's GAN is clearly closer to real fraud."]:
+                st.markdown(f"- {line}")
+            if rf["better"]:
+                section("Where mine was the better one")
+                for line in rf["better"]:
+                    st.markdown(f"- {line}")
+        with b:
+            section("What I would change")
+            for line in rf["changes"]:
+                st.markdown(f"- {line}")
+        st.caption("Auto-written from the numbers on the other tabs — a starting point for your own reflection paragraph.")
     st.info("Next → **⑤ Noon-GAN classifier**: what happens when a classifier is built from Noon's GAN data?")
 
 
@@ -382,6 +492,16 @@ def _s7(ctx: dict) -> None:
     show_kpi(c[2], "Noon B vs my first model (S2)", f"{(nb['recall'] - s2['recall']) * 100:+.0f} pts recall", f"{nb['tp'] - s2['tp']:+d} frauds caught", "cyan")
     st.write("")
 
+    best_recall = max(rows, key=lambda r: r["recall"]); fewest_fp = min(rows, key=lambda r: r["fp"])
+    st.markdown(f"**Who caught more real fraud?** {best_recall['model']} — {best_recall['tp']} of 65 ({best_recall['recall'] * 100:.0f}%).  \n"
+                f"**Who flagged fewer innocent orders?** {fewest_fp['model']} — {fewest_fp['fp']} false alarms "
+                f"(Noon B: {nb['fp']}).")
+    s0 = _bench("S0")
+    g = st.columns(3)
+    show_kpi(g[0], "My GAN's lift (S0 → S2)", f"{(s2['recall'] - s0['recall']) * 100:+.0f} pts recall", f"{s0['recall']:.2f} → {s2['recall']:.2f}", "cyan")
+    show_kpi(g[1], "Noon's GAN fraud in my model (S2 → N1)", f"{(n1['recall'] - s2['recall']) * 100:+.0f} pts recall", f"{s2['recall']:.2f} → {n1['recall']:.2f}", "green")
+    show_kpi(g[2], "Noon's own GAN lift (A → B, reported)", "+68 pts recall", "0.14 → 0.82 · Model A had 1 false alarm", "")
+    st.write("")
     section("What each classifier looks at", "Random-forest feature importance: which columns drive each model's decision.")
     imp = pd.concat([K.importances_by_feature(load_bundle(m)["model"], load_bundle(m)["columns"]).rename("value")
                      .reset_index().rename(columns={"index": "feature"}).assign(series=NAMES[m]) for m in NAMES])
