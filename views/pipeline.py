@@ -61,6 +61,17 @@ def _fraud_probs(dedupe: bool) -> dict:
     return {NAMES[m]: {s: predict_proba_df(m, df) for s, df in f.items()} for m in NAMES}
 
 
+@st.cache_data(show_spinner=False)
+def _seed_counts() -> tuple[int, int]:
+    """(rows, fraud rows) of my seed set. The 30 MB seed file is only needed for these two numbers here, so if it is
+    missing from a deployment (e.g. left out of the repo) fall back to the documented 159,200 legit + 800 fraud."""
+    try:
+        seed = load_seed_train()
+        return len(seed), int(seed[C.TARGET].sum())
+    except FileNotFoundError:
+        return 160_000, 800
+
+
 def _metrics(mk: str, ek: str, t: float) -> dict:
     y = load_eval_set(ek)[C.TARGET].to_numpy(); p = score_eval_set(mk, ek)
     g = global_scores(mk, ek)
@@ -103,14 +114,14 @@ def render(ctx: dict) -> None:
 def _summary(ctx: dict) -> None:
     t = ctx["threshold"]
     comp = _comparison(True); tab = comp["table"]; lie = _lie(True)
-    seed = load_seed_train(); ref = load_eval_set("referee")
+    seed_n, seed_fraud = _seed_counts(); ref = load_eval_set("referee")
     s2_seed, n1_seed = _metrics("S2", "seed_test", t), _metrics("N1", "seed_test", t)
     s2, n1, nb = (_metrics(m, "referee", t) for m in ("S2", "N1", "NoonB"))
     probs = _fraud_probs(True)
     cnt = tab["verdict"].value_counts()
     rows = [
         ("1", "Create dataset with my GAN", "CTGAN",
-         f"5,000 synthetic fraud rows · my seed is {seed[C.TARGET].mean() * 100:.2f}% fraud (real: {ref[C.TARGET].mean() * 100:.2f}%)"),
+         f"5,000 synthetic fraud rows · my seed is {seed_fraud / seed_n * 100:.2f}% fraud (real: {ref[C.TARGET].mean() * 100:.2f}%)"),
         ("2", "Classifier on my GAN dataset", "S2",
          f"On my own synthetic test: recall {s2_seed['recall']:.2f}, precision {s2_seed['precision']:.2f}"),
         ("3", "Take Noon's GAN dataset", "—", f"{len(load_noon_gan()):,} rows, only {len(load_noon_gan(True)):,} distinct"),
@@ -146,14 +157,15 @@ def _summary(ctx: dict) -> None:
 
 # ------------------------------------------------------------------------------------ step 1
 def _s1(ctx: dict) -> None:
-    seed = load_seed_train(); ref = load_eval_set("referee"); mine = fraud_source("my_gan")
+    seed_n, seed_fraud = _seed_counts(); ref = load_eval_set("referee"); mine = fraud_source("my_gan")
+    seed_rate = seed_fraud / seed_n
     section("Step 1 · Create a dataset with my GAN",
             "Noon only gave the column names. I reasoned out a seed dataset, then used a CTGAN to generate extra synthetic fraud.")
     c = st.columns(4)
-    show_kpi(c[0], "Seed dataset", f"{len(seed):,}", f"{int(seed[C.TARGET].sum())} fraud · {seed[C.TARGET].mean() * 100:.2f}%", "cyan")
+    show_kpi(c[0], "Seed dataset", f"{seed_n:,}", f"{seed_fraud} fraud · {seed_rate * 100:.2f}%", "cyan")
     show_kpi(c[1], "Real fraud rate (referee)", f"{ref[C.TARGET].mean() * 100:.2f}%", f"{int(ref[C.TARGET].sum())} of {len(ref):,}", "")
     show_kpi(c[2], "GAN fraud rows (delivered)", f"{len(mine):,}", "synthetic · is_fraud = 1", "green")
-    show_kpi(c[3], "Seed vs real rarity", f"{seed[C.TARGET].mean() / ref[C.TARGET].mean():.1f}×", "my seed is this many times fraudier", "red")
+    show_kpi(c[3], "Seed vs real rarity", f"{seed_rate / ref[C.TARGET].mean():.1f}×", "my seed is this many times fraudier", "red")
     st.write("")
     a, b = st.columns([3, 2], gap="large")
     with a:
