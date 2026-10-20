@@ -7,7 +7,7 @@ from src.data import load_eval_set
 from src.metrics import cost_curve, fn_cost_vector, total_cost
 from src.models import score_eval_set
 from src.state import set_threshold
-from src.styling import plot, section, show_kpi, style_fig
+from src.styling import compact, plot, section, show_kpi, style_fig
 
 FN_MODES = ["Fixed $ per missed fraud", "Order value × multiplier + fee"]
 
@@ -45,7 +45,7 @@ def render(ctx: dict) -> None:
     r = total_cost(y, p, t, c_fp, fnc, c_rev)
     days = {"day": 1, "month (30d)": 30, "year (365d)": 365}[horizon]
     scale = daily * days / len(y)
-    money = lambda v: f"-${abs(v)*scale:,.0f}" if v < 0 else f"${v*scale:,.0f}"
+    money = lambda v: compact(v * scale, "$")          # $5.89M / $554.8K / $8,420
 
     curve = cost_curve(mk, ek, c_fp, mode, fixed, mult, fee, fx, c_rev)
     best = curve.loc[curve["total"].idxmin()]
@@ -71,10 +71,10 @@ def render(ctx: dict) -> None:
         fig = go.Figure(go.Waterfall(
             x=[c[0] for c in comp] + ["Total with model"], measure=["absolute"] + ["relative"] * (len(comp) - 1) + ["total"],
             y=[c[1] * scale for c in comp] + [0],
-            text=[f"${c[1]*scale:,.0f}" if i != 1 else f"-${r['prevented']*scale:,.0f}" for i, c in enumerate(comp)] + [money(r["total"])],
+            text=[money(c[1]) if i != 1 else "-" + money(r["prevented"]) for i, c in enumerate(comp)] + [money(r["total"])],
             increasing=dict(marker=dict(color=C.CYAN)), decreasing=dict(marker=dict(color=C.SAFE_GREEN)),
             totals=dict(marker=dict(color=C.NOON_YELLOW)), connector=dict(line=dict(color=C.GRID))))
-        fig.update_yaxes(title=f"USD per {horizon.split()[0]}", tickprefix="$")
+        fig.update_yaxes(title=f"USD per {horizon.split()[0]}", tickprefix="$", tickformat="~s")
         plot(style_fig(fig, 400, "Where the money goes"))
     with right:
         fig = go.Figure()
@@ -85,7 +85,7 @@ def render(ctx: dict) -> None:
         fig.add_vline(x=t, line_dash="dash", line_color="white", annotation_text=f"current {t:.2f}")
         fig.add_scatter(x=[best["threshold"]], y=[best["total"] * scale], mode="markers", name="Cost-optimal",
                         marker=dict(size=14, color=C.SAFE_GREEN, symbol="star", line=dict(color="white", width=1)))
-        fig.update_xaxes(title="Threshold"); fig.update_yaxes(title=f"USD per {horizon.split()[0]}", tickprefix="$")
+        fig.update_xaxes(title="Threshold"); fig.update_yaxes(title=f"USD per {horizon.split()[0]}", tickprefix="$", tickformat="~s")
         plot(style_fig(fig, 400, "Cost vs threshold"))
 
     a, b = st.columns([2, 3], gap="large")
