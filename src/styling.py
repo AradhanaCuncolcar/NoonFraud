@@ -40,6 +40,18 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .sec h3 {{ margin: 0; font-size: 1.3rem; font-weight: 700; }}
 .sec-sub {{ color: {C.MUTED}; margin: 0 0 12px 16px; font-size: .92rem; }}
 
+/* ---- 7-step pipeline strip ---- */
+.steps {{ display:grid; grid-template-columns: repeat(7, 1fr); gap:8px; margin: 2px 0 14px; }}
+.step {{ background:{C.PANEL}; border:1px solid {C.GRID}; border-top:3px solid {C.GRID}; border-radius:10px;
+  padding:8px 10px; font-size:.78rem; line-height:1.25; }}
+.step .n {{ color:{C.MUTED}; font-weight:800; font-size:.72rem; letter-spacing:.06em; }}
+.step .t {{ font-weight:700; margin-top:2px; }}
+.step .m {{ color:{C.MUTED}; margin-top:3px; font-size:.72rem; }}
+.step.star {{ border-top-color:{C.NOON_YELLOW}; }}
+.step.active {{ background:{C.PANEL_2}; border-color:{C.NOON_YELLOW}; box-shadow:0 0 0 1px {C.NOON_YELLOW} inset; }}
+.step.active .n {{ color:{C.NOON_YELLOW}; }}
+@media (max-width: 1000px) {{ .steps {{ grid-template-columns: repeat(2, 1fr); }} }}
+
 /* ---- verdict pill ---- */
 .verdict {{ border-radius: 14px; padding: 16px 22px; font-weight: 800; font-size: 1.5rem; text-align:center; }}
 .verdict.fraud {{ background: rgba(255,90,95,.14); border: 2px solid {C.FRAUD_RED}; color: {C.FRAUD_RED}; }}
