@@ -1,4 +1,6 @@
 """Theme helpers: global CSS, Plotly template and small HTML components."""
+import re
+
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
@@ -26,10 +28,14 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 
 /* ---- KPI cards ---- */
 .kpi {{ background: {C.PANEL}; border: 1px solid {C.GRID}; border-left: 4px solid {C.NOON_YELLOW};
-  border-radius: 12px; padding: 14px 18px; height: 100%; }}
-.kpi .lbl {{ color: {C.MUTED}; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }}
-.kpi .val {{ font-size: 1.9rem; font-weight: 800; line-height: 1.15; margin-top: 2px; }}
-.kpi .sub {{ color: {C.MUTED}; font-size: .8rem; margin-top: 2px; }}
+  border-radius: 12px; padding: 14px 18px; height: 100%; box-sizing: border-box; }}
+/* every card reserves two lines for its label and sub-text, so a row of cards is always the same height */
+.kpi .lbl {{ color: {C.MUTED}; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 600;
+  line-height: 1.3; min-height: 2.6em; }}
+.kpi .val {{ font-size: 1.9rem; font-weight: 800; line-height: 1.15; margin-top: 2px; min-height: 2.2rem;
+  display: flex; align-items: center; }}
+.kpi .val.long {{ font-size: 1.1rem; }}
+.kpi .sub {{ color: {C.MUTED}; font-size: .8rem; margin-top: 2px; line-height: 1.3; min-height: 2.6em; }}
 .kpi.red {{ border-left-color: {C.FRAUD_RED}; }} .kpi.green {{ border-left-color: {C.SAFE_GREEN}; }}
 .kpi.cyan {{ border-left-color: {C.CYAN}; }}
 .kpi .up {{ color: {C.SAFE_GREEN}; }} .kpi .down {{ color: {C.FRAUD_RED}; }}
@@ -113,9 +119,24 @@ def section(title: str, subtitle: str = "") -> None:
         st.markdown(f'<div class="sec-sub">{subtitle}</div>', unsafe_allow_html=True)
 
 
+def compact(v: float, prefix: str = "", decimals: int = 2) -> str:
+    """Short number: 1_234_567 -> '1.23M', 4.1e9 -> '4.10B', 554_800 -> '554.8K'; anything below 100,000 stays in full."""
+    a = abs(float(v))
+    if a >= 1e9:
+        body = f"{a / 1e9:.{decimals}f}B"
+    elif a >= 1e6:
+        body = f"{a / 1e6:.{decimals}f}M"
+    elif a >= 1e5:
+        body = f"{a / 1e3:.{decimals - 1}f}K"
+    else:
+        body = f"{a:,.0f}"
+    return f"{'-' if v < 0 and body.strip('0.,BMK') else ''}{prefix}{body}"
+
+
 def kpi(label: str, value: str, sub: str = "", tone: str = "") -> str:
-    """Return the HTML of a KPI card (tone: '', 'red', 'green', 'cyan')."""
-    return (f'<div class="kpi {tone}"><div class="lbl">{label}</div><div class="val">{value}</div>'
+    """Return the HTML of a KPI card (tone: '', 'red', 'green', 'cyan'). Long text values get a smaller font."""
+    long = " long" if len(re.sub(r"<[^>]+>", "", str(value))) > 13 else ""
+    return (f'<div class="kpi {tone}"><div class="lbl">{label}</div><div class="val{long}">{value}</div>'
             f'<div class="sub">{sub}</div></div>')
 
 
@@ -124,9 +145,12 @@ def show_kpi(col, *args, **kw) -> None:
 
 
 def style_fig(fig: go.Figure, height: int = 380, title: str | None = None) -> go.Figure:
+    """Apply the Noon template. Title sits top-left; the legend sits in its own band under it (never on top of it)."""
     fig.update_layout(height=height, template="noon")
     if title:
-        fig.update_layout(title=title)
+        fig.update_layout(title=dict(text=title, x=0, xanchor="left", y=0.98, yanchor="top"))
+    has_title = bool(title or fig.layout.title.text)
+    fig.update_layout(margin=dict(t=105 if has_title else 60), legend_title_text="")
     return fig
 
 

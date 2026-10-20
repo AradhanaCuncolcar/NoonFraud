@@ -116,7 +116,9 @@ def grid_fig(frames: dict[str, pd.DataFrame]) -> go.Figure:
             fig.update_yaxes(range=[0, 105], row=r, col=c)
     fig.update_layout(barmode="group", bargap=0.25)
     fig.update_annotations(font_size=12)
-    return style_fig(fig, 520)
+    style_fig(fig, 540)
+    fig.update_layout(margin=dict(t=100), legend=dict(x=0, y=1.17))   # legend above the subplot titles
+    return fig
 
 
 def corr_fig(mine: pd.DataFrame, noon: pd.DataFrame) -> go.Figure:
