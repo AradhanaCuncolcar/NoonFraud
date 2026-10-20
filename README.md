@@ -1,7 +1,7 @@
 # 🟡 Noon · Fraud Intelligence Console
 
 Interactive Streamlit dashboard built on top of the **Noon Fraud Lab** submission
-(GAN-augmented fraud detection for UAE food delivery). Noon-yellow-on-black theme, eight pages, fully self-contained
+(GAN-augmented fraud detection for UAE food delivery). Noon-yellow-on-black theme, nine pages, fully self-contained
 (data + trained models are in this folder).
 
 ## Run it
@@ -17,7 +17,8 @@ Tested with Streamlit 1.66, Plotly 7.1, SHAP 0.54, mlxtend 0.25, LIME 0.2.
 | Page | What it does |
 |---|---|
 | 🏠 **Overview** | KPIs for the selected model/dataset + the notebook's model scorecard (S0 … Noon B). |
-| 🔬 **GAN pipeline** | The assignment's 7 steps side by side, **my GAN vs Noon's GAN**: ① my GAN dataset → ② classifier on it (S2) → ③ Noon's GAN dataset → ④ **feature-by-feature comparison** (scorecard with a distance + Match/Close/Differs verdict for all 10 features, per-feature drill-down, all-features grid, correlation structure, lie-detector, optional real-fraud reference) → ⑤ classification on Noon's GAN data (N1, cross-detection chart) → ⑥ both classifiers on Noon's real orders → ⑦ comparison with Noon's own classifier (Noon B): metrics, ROC, confusion matrices, feature importance. |
+| 🔬 **GAN pipeline** | The assignment's 7 steps (Phase 1: steps 1–2 · Phase 2: 3–4 · Phase 3: 5–7) side by side, with: assumption check, rarity decision, GAN-training loss curve (upload `gan.loss_values` CSV or save it as `data/ctgan_loss.csv`), S0 → S2 before/after, fraud-proportion and reflection tabs, and Noon's own GAN lift. **my GAN vs Noon's GAN**: ① my GAN dataset → ② classifier on it (S2) → ③ Noon's GAN dataset → ④ **feature-by-feature comparison** (scorecard with a distance + Match/Close/Differs verdict for all 10 features, per-feature drill-down, all-features grid, correlation structure, lie-detector, optional real-fraud reference) → ⑤ classification on Noon's GAN data (N1, cross-detection chart) → ⑥ both classifiers on Noon's real orders → ⑦ comparison with Noon's own classifier (Noon B): metrics, ROC, confusion matrices, feature importance. |
+| 📋 **Phases & report** | Coverage map of the 4 assignment phases (brief step → where it lives on the dashboard), a ≈1-page report whose numbers are computed live (assumptions, GAN before/after, vs Noon and why, why-not-an-LLM), and downloads (report, my 5,000 GAN fraud rows, model metrics). |
 | 🎚️ **Threshold lab** (#3) | Threshold slider (synced with the sidebar) → Precision, Recall, F1, ROC-AUC, confusion matrix, trade-off curve, ROC curve with the live operating point. |
 | 💰 **ROI simulator** (#4) | Custom $ cost per False Positive / False Negative (fixed *or* order-value-based), optional review cost, scaling to daily/monthly/yearly volume, cost-vs-threshold curve, one-click "apply cost-optimal threshold". |
 | 🔍 **Explainer** (#2) | Build or pick a transaction → verdict + risk gauge + **SHAP waterfall** and/or **LIME** breakdown; global SHAP summary (bar + beeswarm). |
