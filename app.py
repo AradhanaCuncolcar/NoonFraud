@@ -10,10 +10,11 @@ st.set_page_config(page_title="Noon · Fraud Intelligence Console", page_icon="�
 from src import config as C                                    # noqa: E402  (after set_page_config)
 from src.state import init_state, threshold_slider, set_threshold  # noqa: E402
 from src.styling import hero, inject_css                       # noqa: E402
-from views import eda, explainer, gan_lab, overview, roi, rules, threshold  # noqa: E402
+from views import eda, explainer, gan_lab, overview, pipeline, roi, rules, threshold  # noqa: E402
 
 PAGES = {
     "🏠 Overview": overview,
+    "🔬 GAN pipeline": pipeline,
     "🎚️ Threshold lab": threshold,
     "💰 ROI simulator": roi,
     "🔍 Explainer": explainer,

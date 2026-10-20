@@ -1,7 +1,7 @@
 # 🟡 Noon · Fraud Intelligence Console
 
 Interactive Streamlit dashboard built on top of the **Noon Fraud Lab** submission
-(GAN-augmented fraud detection for UAE food delivery). Noon-yellow-on-black theme, seven pages, fully self-contained
+(GAN-augmented fraud detection for UAE food delivery). Noon-yellow-on-black theme, eight pages, fully self-contained
 (data + trained models are in this folder).
 
 ## Run it
@@ -17,6 +17,7 @@ Tested with Streamlit 1.66, Plotly 7.1, SHAP 0.54, mlxtend 0.25, LIME 0.2.
 | Page | What it does |
 |---|---|
 | 🏠 **Overview** | KPIs for the selected model/dataset + the notebook's model scorecard (S0 … Noon B). |
+| 🔬 **GAN pipeline** | The assignment's 7 steps side by side, **my GAN vs Noon's GAN**: ① my GAN dataset → ② classifier on it (S2) → ③ Noon's GAN dataset → ④ **feature-by-feature comparison** (scorecard with a distance + Match/Close/Differs verdict for all 10 features, per-feature drill-down, all-features grid, correlation structure, lie-detector, optional real-fraud reference) → ⑤ classification on Noon's GAN data (N1, cross-detection chart) → ⑥ both classifiers on Noon's real orders → ⑦ comparison with Noon's own classifier (Noon B): metrics, ROC, confusion matrices, feature importance. |
 | 🎚️ **Threshold lab** (#3) | Threshold slider (synced with the sidebar) → Precision, Recall, F1, ROC-AUC, confusion matrix, trade-off curve, ROC curve with the live operating point. |
 | 💰 **ROI simulator** (#4) | Custom $ cost per False Positive / False Negative (fixed *or* order-value-based), optional review cost, scaling to daily/monthly/yearly volume, cost-vs-threshold curve, one-click "apply cost-optimal threshold". |
 | 🔍 **Explainer** (#2) | Build or pick a transaction → verdict + risk gauge + **SHAP waterfall** and/or **LIME** breakdown; global SHAP summary (bar + beeswarm). |
@@ -39,6 +40,8 @@ src/              logic (no page layout)
   rules.py        Apriori / FP-Growth mining
   gan_sim.py      GAN-lab perturbation simulator + retrain test
   eda.py          Plotly EDA figures
+  compare.py      GAN-vs-GAN feature distances, verdicts, lie-detector, cross-detection (pure pandas/sklearn)
+  compare_plots.py  Plotly figures for the GAN pipeline page
   state.py        shared-threshold session-state helpers
 views/            one module per page (st.columns / st.expander layouts)
 data/ models/     CSVs and trained random forests
@@ -52,6 +55,10 @@ Only the selected page renders, so interactions stay fast.
   the red dot on the ROC curve is what moves. Precision, recall and F1 update instantly.
 * Prediction rule is `P(fraud) > threshold`, which reproduces the notebook's confusion matrices exactly at 0.50
   (N1: 26 TP / 38 FP; S2: 13 / 31; Noon B: 53 / 71).
+* **GAN pipeline, step ④ distances** are on a 0–1 scale: KS statistic (numeric), gap in rate (flags), total-variation (payment).
+  Match < 0.10 · Close < 0.25 · Differs ≥ 0.25. Noon's file is de-duplicated by default (toggle in the page's options); the
+  lie-detector always de-duplicates so repeated rows cannot leak across CV folds. Real fraud (65 rows) is only a descriptive
+  reference. Step ⑤ is fraud-only data, so it measures *how much* of each fraud set a classifier recognises (N1 has seen Noon's file in training).
 * **GAN lab is a post-generation simulator.** It perturbs the 15,000 rows your CTGAN actually generated
   (noise / variance / flag flips / rule rejection). It does *not* re-sample CTGAN's latent vector — that would need
   PyTorch + CTGAN. Treat it as "what if the generator were noisier / more dispersed", not as a retrained GAN.
