@@ -48,12 +48,13 @@ def render(ctx: dict) -> None:
             "(recall 0.82 vs 0.40).")
         with st.expander("What can I do in this dashboard?", expanded=True):
             st.markdown(
-                "1. **Threshold lab** – slide the cut-off, watch precision / recall / F1 / ROC move.\n"
-                "2. **ROI simulator** – put dollar costs on false alarms and missed fraud.\n"
-                "3. **Explainer** – SHAP / LIME breakdown of any single transaction.\n"
-                "4. **Rule mining** – Apriori / FP-Growth patterns hiding in fraud.\n"
-                "5. **GAN vs real EDA** – interactive histograms and 3-D scatter.\n"
-                "6. **GAN lab** – turn noise / variance knobs and see the synthetic data change.")
+                "1. **GAN pipeline** – the 7 assignment steps: my GAN vs Noon's GAN, feature by feature, through to the classifiers.\n"
+                "2. **Threshold lab** – slide the cut-off, watch precision / recall / F1 / ROC move.\n"
+                "3. **ROI simulator** – put dollar costs on false alarms and missed fraud.\n"
+                "4. **Explainer** – SHAP / LIME breakdown of any single transaction.\n"
+                "5. **Rule mining** – Apriori / FP-Growth patterns hiding in fraud.\n"
+                "6. **GAN vs real EDA** – interactive histograms and 3-D scatter.\n"
+                "7. **GAN lab** – turn noise / variance knobs and see the synthetic data change.")
         with st.expander("Data & integrity notes"):
             st.markdown(
                 "- The referee set is **test-only**: no model in this dashboard is trained or tuned on it.\n"
